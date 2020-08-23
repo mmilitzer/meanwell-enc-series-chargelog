@@ -26,6 +26,7 @@ Pin 4 TX (output) --->--- RX (input)
 Version 1.0: Argument checks for ENC-120-12 only.
              No temperature monitoring.
 Version 1.1: Minor change in print to file needed by Python 3.4.4.
+Version 1.2: Argument checks also for other ENC model/types
 """
 
 import signal
@@ -36,7 +37,7 @@ import serial
 import time
 
 version_major = 1
-version_minor = 0
+version_minor = 2 
 
 mockup = False
 
@@ -155,7 +156,7 @@ def log_open(logfile, x_maxchars):
 
     if (os.path.isfile(logfile)):
         print_warning('File exists.')
-        answer = input('Append to exisiting logfile (y/n)? ')
+        answer = input('Append to existing logfile (y/n)? ')
         if answer == 'y':
             (rd_result, startepoch, read_count, elapsed) = log_readold(logfile, x_maxchars)
             if rd_result:
@@ -580,11 +581,10 @@ def check_charger_id():
         err = True
 
     if not err:
-        if (cmodel != 0) or (ctype != 0):
+        if ((cmodel != 0) or (ctype != 0)) and ((cmodel != 2) or (ctype != 2)):
             print_warning('Detected charger: %s.' % cname)
             print_warning('The software has been tested only with the ENC-120-12')
-            print_warning('so far. Parameter checks/limits are only valid for the')
-            print_warning('ENC-120-12.')
+            print_warning('and the ENC-240-48 so far.')
             answer = input('Continue anyway (y/n)? ')
             if answer != 'y':
                 err = True
@@ -617,24 +617,33 @@ def read_settings():
 
     return (result, csettings)
 
-#currently only for ENC-120-12 (cmodel 0, ctype 0)
 def check_settings(csettings, cmodel, ctype):
-    result = True
-    if (csettings[ckey_cc] < 2.4) or (csettings[ckey_cc] > 8.0):
-        print_warning('constcurr = %.1f, allowed range 2.4 <= constcurr <= 8.0.' % csettings[ckey_cc])
+    if (cmodel < 0) or (cmodel > 3) or (ctype < 0) or (ctype > 2):
+        return False # Unknown model or type!
+
+    # Limits
+    cv_min = (2**ctype) * 9.0
+    cv_max = (2**ctype) * 15.0
+    cc_min = (((1. + 0.5 * (0x2&cmodel)) * (1. + 0.5*(0x1&cmodel))) / (2**ctype)) * 2.4
+    cc_max = (10.*cc_min) / 3.
+
+    result = True  
+    if (csettings[ckey_cc] < cc_min) or (csettings[ckey_cc] > cc_max):
+        print_warning('constcurr = %.1f, allowed range %f <= constcurr <= %f.' % (csettings[ckey_cc], cc_min, cc_max))
         result = False
-    if (csettings[ckey_cv] < 9.0) or (csettings[ckey_cv] > 15.0):
-        print_warning('constvolt = %.1f, allowed range 9.0 <= constvolt <= 15.0.' % csettings[ckey_cv])
+    if (csettings[ckey_cv] < cv_min) or (csettings[ckey_cv] > cv_max):
+        print_warning('constvolt = %.1f, allowed range %f <= constvolt <= %f.' % (csettings[ckey_cv], cv_min, cv_max))
         result = False
-    if (csettings[ckey_fv] < 9.0) or (csettings[ckey_fv] > csettings[ckey_cv]):
-        print_warning('floatvolt = %.1f, allowed range 9.0 <= floatvolt <= constvolt(%.1f).' % (csettings[ckey_fv], csettings[ckey_cv]))
+    if (csettings[ckey_fv] < cv_min) or (csettings[ckey_fv] > csettings[ckey_cv]):
+        print_warning('floatvolt = %.1f, allowed range %f <= floatvolt <= constvolt(%.1f).' % (csettings[ckey_fv], cv_min, csettings[ckey_cv]))
         result = False
-    if (csettings[ckey_tc] < 0.8) or (csettings[ckey_tc] > 2.4):
-        print_warning('tapercurr = %.1f, allowed range 0.8 <= tapercurr <= 2.4.' % csettings[ckey_tc])
+    if (csettings[ckey_tc] < (cc_min / 3.)) or (csettings[ckey_tc] > cc_min):
+        print_warning('tapercurr = %.1f, allowed range %f <= tapercurr <= %f.' % (csettings[ckey_tc], (cc_min / 3.), cc_min))
         result = False
     if (csettings[ckey_cfg] < 0) or (csettings[ckey_cfg] > 3):
         print_warning('config = %d, allowed range 0 <= config <= 3.' % csettings[ckey_cfg])
         result = False
+
     return result
 
 def check_charging():
